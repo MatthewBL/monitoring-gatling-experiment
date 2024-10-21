@@ -1,0 +1,1 @@
+timestamp_millis,cpu_load,process_cpu_load,process_cpu_time_nanosecs,total_memory_os_bytes,free_memory_os_bytes,jvm_total_memory_bytes,jvm_free_memory_bytes

@@ -1,0 +1,8 @@
+{
+  "id": null,
+  "title": "What vaccines should my pet get",
+  "status": "PENDING",
+  "isClinicComment": false,
+  "pet": #{pet},
+  "owner": #{owner}
+}
