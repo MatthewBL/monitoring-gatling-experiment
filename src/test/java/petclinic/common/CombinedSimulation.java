@@ -3,13 +3,29 @@ package petclinic.common;
 import static io.gatling.javaapi.core.CoreDsl.*;
 import static io.gatling.javaapi.http.HttpDsl.*;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+import org.simpleflatmapper.lightningcsv.Row;
 
 import com.github.javafaker.Faker;
+
+import akka.actor.Cell;
+
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.List;
 
 import io.gatling.javaapi.core.*;
 import io.gatling.javaapi.http.*;
@@ -19,8 +35,9 @@ public class CombinedSimulation extends Simulation {
     Faker faker = new Faker(new Locale("es"), new Random(42));
 
     private final static String URL = System.getProperty("url", "http://localhost:8080");
-    private final static int CONCURRENT_USERS = Integer.getInteger("users", 10);
-    private final static int SIMULATION_DURATION = Integer.getInteger("duration", 3600);  // Duration in seconds
+    private final static int MAX_USERS = Integer.getInteger("maxUsers", 50);
+    private final static int SIMULATION_DURATION = Integer.getInteger("duration", 3600);
+    private final static String WORKLOAD_TYPE = System.getProperty("workloadType", "static"); // New parameter
 
     HttpProtocolBuilder httpProtocol = http.baseUrl(URL).disableCaching();
 
@@ -28,48 +45,87 @@ public class CombinedSimulation extends Simulation {
             "Authorization", "Bearer #{auth}",
             "Pricing-Token", "#{pricingToken}");
 
-    // Pricing type assignment logic
-    private ChainBuilder assignPricingType = exec(session -> {
-        double rand = Math.random();
-        String pricingType;
-        if (rand < 0.6) {
-            pricingType = "basic";
-        } else if (rand < 0.9) {
-            pricingType = "gold";
-        } else {
-            pricingType = "platinum";
+    private final List<UserCredentials> userCredentials = new CopyOnWriteArrayList<>();
+
+    public CombinedSimulation() {
+        // Load user credentials from CSV at initialization
+        loadUserCredentials("src/test/resources/user_credentials.csv");
+        configureWorkload();
+    }
+
+    private void loadUserCredentials(String filePath) {
+        try (BufferedReader br = new BufferedReader(new FileReader(filePath))) {
+            br.readLine();
+            String line;
+            while ((line = br.readLine()) != null && userCredentials.size() < 200) {
+                String[] fields = line.split(",");
+                if (fields.length >= 3) {  // Expecting 3 fields: username, password, pricingType
+                    String username = fields[0].trim();
+                    String password = fields[1].trim();
+                    String pricingType = fields[2].trim();
+                    userCredentials.add(new UserCredentials(username, password, pricingType));
+                }
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to load user credentials from CSV file", e);
         }
-        return session.set("pricingType", pricingType);
+    }
+
+    // Struct for holding credentials with pricing plan
+    private static class UserCredentials {
+        String username;
+        String password;
+        String pricingType;
+
+        UserCredentials(String username, String password, String pricingType) {
+            this.username = username;
+            this.password = password;
+            this.pricingType = pricingType;
+        }
+    }
+
+    // Helper function to safely get and release credentials
+    private synchronized UserCredentials acquireUserCredentials() {
+        if (userCredentials.isEmpty()) {
+            throw new RuntimeException("No available user credentials for login.");
+        }
+        return userCredentials.remove(0);
+    }
+
+    private synchronized void releaseUserCredentials(UserCredentials credentials) {
+        userCredentials.add(credentials);
+    }
+    
+    // Login chain using loaded credentials
+    private ChainBuilder login = exec(session -> {
+        // Fetch a unique user credential for this session
+        UserCredentials credentials = acquireUserCredentials();
+        session.set("credentials", credentials);  // Store in session for later release
+        
+        return session.setAll(Map.of("username", credentials.username, "password", credentials.password, 
+                                     "pricingType", credentials.pricingType));
+    }).exec(http("Login")
+        .post("/api/v1/auth/signin")
+        .body(StringBody("{\"username\": \"#{username}\", \"password\": \"#{password}\"}"))
+        .asJson()
+        .check(jmesPath("id").saveAs("userId"),
+            jmesPath("token").saveAs("auth"),
+            jmesPath("pricingToken").saveAs("pricingToken")))
+    .exec(session -> {
+        // At the end of the session, release the credential back to the pool
+        UserCredentials credentials = session.get("credentials");
+        releaseUserCredentials(credentials);
+        return session;
     });
-
-    // Common chain: user registration
-    ChainBuilder register = exec(session -> {
-        String username = faker.name().firstName().replaceAll("[^a-zA-Z0-9]", "") + System.currentTimeMillis();
-        return session.setAll(Map.of("firstName", faker.name().firstName(),
-                "lastName", faker.name().lastName(),
-                "address", faker.address().streetName(),
-                "username", username  // Store unique username
-            ));
-    }).exec(http("Get clinics").get("/api/v1/clinics").asJson(),
-            http("Registration").post("/api/v1/auth/signup")
-                    .body(ElFileBody("#{pricingType}/registration.json")).asJson()
-                    .check(status().is(200)));
-
-    // Login chain
-    ChainBuilder login = exec(http("Login")
-            .post("/api/v1/auth/signin").body(ElFileBody("login.json"))
-            .asJson().check(jmesPath("id").saveAs("userId"),
-                    jmesPath("token").saveAs("auth"),
-                    jmesPath("pricingToken").saveAs("pricingToken")));
 
     // "Pets" simulation chain (common to all users)
     ChainBuilder petListing = group("List my pets and their visits").on(exec(
-            http("Get my pets").get("/api/v1/pets")
-                    .queryParam("userId", "#{userId}")
-                    .headers(sentHeaders),
-            http("Get my pets visits").get("/api/v1/visits")
-                    .headers(sentHeaders)),
-            pause(Duration.ofMillis(300)));
+        http("Get my pets").get("/api/v1/pets")
+            .queryParam("userId", "#{userId}")
+            .headers(sentHeaders),
+        http("Get my pets visits").get("/api/v1/visits")
+            .headers(sentHeaders)),
+        pause(Duration.ofMillis(300)));
 
     ChainBuilder formData = exec(
         http("Prefill data in the pet register form").get("/api/v1/pets/types")
@@ -81,9 +137,9 @@ public class CombinedSimulation extends Simulation {
         }).pause(Duration.ofMillis(300));  // Increased pause
 
     ChainBuilder savePet = exec(http("Save my pet").post("/api/v1/pets")
-            .headers(sentHeaders)
-            .body(ElFileBody("pet-registration.json")).asJson()
-            .check(status().is(201), jmesPath("id").saveAs("petId")))
+        .headers(sentHeaders)
+        .body(ElFileBody("pet-registration.json")).asJson()
+        .check(status().is(201), jmesPath("id").saveAs("petId")))
     .pause(Duration.ofMillis(300));
             
 
@@ -93,18 +149,18 @@ public class CombinedSimulation extends Simulation {
     // "Visits" simulation chain (only for gold and platinum users)
     ChainBuilder visitForm = group("Visit form with loaded data").on(exec(
             http("Get details for my pet").get("/api/v1/pets/#{petId}")
-                    .headers(sentHeaders)
-                    .check(jsonPath("$").saveAs("pet")),
+                .headers(sentHeaders)
+                .check(jsonPath("$").saveAs("pet")),
             http("Get vet information").get("/api/v1/vets")
-                    .headers(sentHeaders)
-                    .check(jmesPath("[0]").saveAs("vet"))),
+                .headers(sentHeaders)
+                .check(jmesPath("[0]").saveAs("vet"))),
             pause(Duration.ofMillis(300)));
 
     ChainBuilder registerVisit = exec(
             http("Book a visit for my pet").post("/api/v1/pets/#{petId}/visits")
-                    .headers(sentHeaders)
-                    .body(ElFileBody("visit.json"))
-                    .asJson(),
+                .headers(sentHeaders)
+                .body(ElFileBody("visit.json"))
+                .asJson(),
             pause(Duration.ofMillis(300)));
 
     // "Consultations" simulation chain (only for platinum users)
@@ -123,49 +179,108 @@ public class CombinedSimulation extends Simulation {
 
     ChainBuilder enterConsultationChat = exec(
             http("Get in the consultation chat")
-                    .get("/api/v1/consultations/#{consultationId}/tickets")
-                    .headers(sentHeaders));
+                .get("/api/v1/consultations/#{consultationId}/tickets")
+                .headers(sentHeaders));
 
     ChainBuilder sendConsultation = exec(
             http("Send a message in the chat to the vet")
-                    .post("/api/v1/consultations/#{consultationId}/tickets")
-                    .asJson()
-                    .headers(sentHeaders)
-                    .body(ElFileBody("ticket.json")));
+                .post("/api/v1/consultations/#{consultationId}/tickets")
+                .asJson()
+                .headers(sentHeaders)
+                .body(ElFileBody("ticket.json")));
 
     // Define a method to pick the simulation based on the user's pricing type
     private ChainBuilder pickSimulation = exec(session -> {
         String pricingType = session.getString("pricingType");
-        session.set("randomValue", Math.random()); // Store random value in session for later use
+        session.set("randomValue", Math.random());
         return session;
-    }).doIf(session -> "basic".equals(session.getString("pricingType"))).then(
-        // Basic users always get the "pets" simulation
+    }).doIf(session -> "BASIC".equals(session.getString("pricingType"))).then(
         exec(petListing, formData, savePet, petListing, deletePet, petListing)
-    ).doIf(session -> "gold".equals(session.getString("pricingType"))).then(
-        // Gold users can either get "pets" or "visits" simulation
+    ).doIf(session -> "GOLD".equals(session.getString("pricingType"))).then(
         randomSwitch().on(
             percent(50.0).then(exec(petListing, formData, savePet, petListing, deletePet, petListing)),
             percent(50.0).then(exec(petListing, formData, savePet, visitForm, registerVisit, petListing))
         )
-    ).doIf(session -> "platinum".equals(session.getString("pricingType"))).then(
-        // Platinum users can get one of "pets", "visits", or "consultations"
+    ).doIf(session -> "PLATINUM".equals(session.getString("pricingType"))).then(
         randomSwitch().on(
             percent(33.0).then(exec(petListing, formData, savePet, petListing, deletePet, petListing)),
             percent(33.0).then(exec(petListing, formData, savePet, visitForm, registerVisit, petListing)),
             percent(34.0).then(exec(petListing, formData, savePet, consultationForm, registerConsultation, enterConsultationChat, sendConsultation))
         )
     );
-
-    // Main scenario that repeats forever, assigning new roles each time a user completes a cycle
+    
+    // Main Scenario without registration
     ScenarioBuilder concurrentOwners = scenario("Concurrent Owners Simulation")
-        .exec(assignPricingType) 
-        .exec(register, login)
+        .exec(login)
         .during(Duration.ofSeconds(SIMULATION_DURATION)).on(exec(pickSimulation));
 
+    ScenarioBuilder concurrentOwners2 = scenario("Concurrent Owners Simulation 2")
+        .exec(login)
+        .during(Duration.ofSeconds(SIMULATION_DURATION)).on(exec(pickSimulation));
 
-    {
-        setUp(concurrentOwners.injectOpen(atOnceUsers(CONCURRENT_USERS))) // Inject users all at once
-                .protocols(httpProtocol)
-                .maxDuration(Duration.ofSeconds(SIMULATION_DURATION));   // Stop simulation after the specified duration
+    private void configureWorkload() {
+        switch (WORKLOAD_TYPE.toLowerCase()) {
+        case "static":
+            setUp(concurrentOwners.injectClosed(
+                constantConcurrentUsers(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION))
+            )).protocols(httpProtocol);
+            break;
+                
+        case "periodic":
+            setUp(concurrentOwners.injectOpen(
+                rampUsers(MAX_USERS/4).during(Duration.ofSeconds(SIMULATION_DURATION / 4)),
+                nothingFor(Duration.ofSeconds(SIMULATION_DURATION / 12)),
+                rampUsers(MAX_USERS/4).during(Duration.ofSeconds(SIMULATION_DURATION / 4)),
+                nothingFor(Duration.ofSeconds(SIMULATION_DURATION / 12)),
+                rampUsers(MAX_USERS/4).during(Duration.ofSeconds(SIMULATION_DURATION / 4)),
+                nothingFor(Duration.ofSeconds(SIMULATION_DURATION / 12)),
+                rampUsers(MAX_USERS/4).during(Duration.ofSeconds(SIMULATION_DURATION / 4))
+            )).protocols(httpProtocol);
+            break;
+                
+        case "peak":
+            setUp(concurrentOwners.injectOpen(
+                rampUsersPerSec(MAX_USERS/SIMULATION_DURATION).to(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 10))
+            )).protocols(httpProtocol);
+            break;
+                
+        case "unpredictable":
+            setUp(concurrentOwners.injectOpen(
+                rampUsersPerSec(0).to(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 10)).randomized()
+            )).protocols(httpProtocol);
+            break;
+                
+        case "constantchange":
+            setUp(concurrentOwners.injectClosed(
+                rampConcurrentUsers(0).to(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION))
+            )).protocols(httpProtocol);
+            break;
+                
+        case "variable":
+            setUp(concurrentOwners.injectOpen(
+                rampUsers(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 4)),
+                nothingFor(Duration.ofSeconds(SIMULATION_DURATION / 12)),
+                rampUsers(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 4)),
+                nothingFor(Duration.ofSeconds(SIMULATION_DURATION / 12)),
+                rampUsers(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 4)),
+                nothingFor(Duration.ofSeconds(SIMULATION_DURATION / 12)),
+                rampUsers(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 4)),
+                rampUsersPerSec(0).to(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 10)),
+                rampUsersPerSec(0).to(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 10)).randomized()
+            ).andThen(
+                concurrentOwners2.injectClosed(
+                    constantConcurrentUsers(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 2)),
+                    rampConcurrentUsers(0).to(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION / 2))
+                )
+            )
+            ).protocols(httpProtocol);
+            break;
+                
+        default:
+            setUp(concurrentOwners.injectClosed(
+                constantConcurrentUsers(MAX_USERS).during(Duration.ofSeconds(SIMULATION_DURATION))
+            )).protocols(httpProtocol);
+            break;
+        }
     }
 }
