@@ -3,6 +3,9 @@ CREATE DATABASE IF NOT EXISTS `petclinic`;
 
 USE `petclinic`;
 
+DROP TABLE IF EXISTS `illnesses`;
+DROP TABLE IF EXISTS `symptoms`;
+DROP TABLE IF EXISTS `illnesses_symptoms`;
 DROP TABLE IF EXISTS `visits`;
 DROP TABLE IF EXISTS `vet_specialties`;
 DROP TABLE IF EXISTS `consultation_tickets`;
@@ -35,9 +38,70 @@ INSERT INTO `authorities` VALUES
 UNLOCK TABLES;
 
 
-CREATE TABLE `specialties` (
+CREATE TABLE `symptoms` (
   `id` int NOT NULL,
   `name` varchar(50) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+LOCK TABLES `symptoms` WRITE;
+INSERT INTO `symptoms` VALUESINSERT INTO symptom (id, name) VALUES
+(1, 'fever'),
+(2, 'coughing'),
+(3, 'sneezing'),
+(4, 'vomiting'),
+(5, 'diarrhea'),
+(6, 'lethargy'),
+(7, 'loss of appetite'),
+(8, 'increased thirst polydipsia'),
+(9, 'increased urination polyuria'),
+(10, 'weight loss'),
+(11, 'weight gain'),
+(12, 'difficulty breathing dyspnea'),
+(13, 'nasal discharge'),
+(14, 'eye discharge'),
+(15, 'redness in eyes conjunctivitis'),
+(16, 'itchy skin pruritus'),
+(17, 'hair loss alopecia'),
+(18, 'skin rashes'),
+(19, 'lumps or masses'),
+(20, 'bad breath halitosis'),
+(21, 'excessive drooling ptyalism'),
+(22, 'pale gums'),
+(23, 'bleeding gums'),
+(24, 'difficulty walking or limping'),
+(25, 'stiffness in joints'),
+(26, 'swollen joints'),
+(27, 'seizures'),
+(28, 'tremors'),
+(29, 'aggressive behavior'),
+(30, 'depression-like behavior'),
+(31, 'restlessness or pacing'),
+(32, 'excessive barking or vocalization'),
+(33, 'difficulty urinating'),
+(34, 'blood in urine (hematuria)'),
+(35, 'blood in stool'),
+(36, 'constipation'),
+(37, 'bloated abdomen'),
+(38, 'painful abdomen'),
+(39, 'increased heart rate (tachycardia)'),
+(40, 'decreased heart rate (bradycardia)'),
+(41, 'uncoordinated movements (ataxia)'),
+(42, 'weakness or collapsing'),
+(43, 'excessive scratching of ears'),
+(44, 'head shaking'),
+(45, 'foul odor from ears'),
+(46, 'excessive panting'),
+(47, 'loss of consciousness'),
+(48, 'disorientation'),
+(49, 'excessive licking of paws or body'),
+(50, 'paralysis in limbs');
+UNLOCK TABLES;
+
+
+CREATE TABLE `specialties` (
+  `id` int NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -609,6 +673,45 @@ INSERT INTO `vets` VALUES
 (2,4,17,'Badajoz','Rafael','Ortega'),
 (3,5,18,'Badajoz','Henry','Stevens'),
 (3,6,19,'Cádiz','Sharon','Jenkins');
+UNLOCK TABLES;
+
+
+
+CREATE TABLE `illnesses` (
+  `id` int NOT NULL,
+  `name` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`),
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+LOCK TABLES `illnesses` WRITE;
+INSERT INTO `illnesses` VALUES
+(1,'Illness1'),
+(2,'Illness2'),
+(3,'Illness3'),
+(4,'Illness4');
+(5,'Illness5');
+(6,'Illness6');
+UNLOCK TABLES;
+
+
+
+CREATE TABLE `illnesses_symptoms` (
+  `symptom_id` int NOT NULL,
+  `illness_id` int NOT NULL,
+  UNIQUE KEY `UK5vkcw8m2n1pifb4h4meuv8p3b` (`symptom_id`,`illness_id`),
+  KEY `FKby1c0fbaa0byaifi63vt18sx0` (`vet_id`),
+  CONSTRAINT `UK5vkcw8m2n1pifb4h4meuv8p3b` FOREIGN KEY (`symptom_id`) REFERENCES `symptoms` (`id`),
+  CONSTRAINT `FKby1c0fbaa0byaifi63vt18sx0` FOREIGN KEY (`illness_id`) REFERENCES `illnesses` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+LOCK TABLES `illnesses_symptoms` WRITE;
+INSERT INTO `illnesses_symptoms` VALUES 
+(1,2),
+(2,3),
+(3,3),
+(2,4),
+(1,5);
 UNLOCK TABLES;
 
 
