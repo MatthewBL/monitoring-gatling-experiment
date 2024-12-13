@@ -22,6 +22,8 @@ import java.io.FileReader;
 import io.gatling.javaapi.core.*;
 import io.gatling.javaapi.http.*;
 
+import java.util.stream.IntStream;
+
 public class CombinedSimulation extends Simulation {
 
     Faker faker = new Faker(new Locale("es"), new Random(42));
@@ -29,9 +31,15 @@ public class CombinedSimulation extends Simulation {
     private final static String URL = System.getProperty("url", "http://localhost:8080");
     private final static int MAX_USERS = Integer.getInteger("maxUsers", 50);
     private final static int SIMULATION_DURATION = Integer.getInteger("duration", 3600);
-    private final static String WORKLOAD_TYPE = System.getProperty("workloadType", "static"); // New parameter
+    private final static String WORKLOAD_TYPE = System.getProperty("workloadType", "static");
+    private final static boolean LIMIT = Boolean.parseBoolean(System.getProperty("limit", "false"));
+    
 
     HttpProtocolBuilder httpProtocol = http.baseUrl(URL).disableCaching();
+
+    private static int BASIC_PET_LIMIT = 2;
+    private static int GOLD_PET_LIMIT = 4;
+    private static int PLATINUM_PET_LIMIT = 7;
 
     Map<String, String> sentHeaders = Map.of(
             "Authorization", "Bearer #{auth}",
@@ -92,6 +100,15 @@ public class CombinedSimulation extends Simulation {
         "paralysis in limbs"
     ));
     private List<String> SYMPTOMS = new ArrayList<>();
+
+    // Define a method to execute a sequence n times if LIMIT is true
+    private ChainBuilder repeatIfLimit(ChainBuilder chain, int n) {
+        if (LIMIT) {
+            return repeat(n).on(chain);
+        } else {
+            return chain;
+        }
+    }    
 
     public CombinedSimulation() {
         // Load user credentials from CSV at initialization
@@ -258,16 +275,16 @@ public class CombinedSimulation extends Simulation {
         SYMPTOMS = new ArrayList<>(ALL_SYMPTOMS.subList(0, 3));
         return session;
     }).doIf(session -> "BASIC".equals(session.getString("pricingType"))).then(
-        exec(petListing, formData, savePet, petListing, deletePet, petListing)
+        repeatIfLimit(exec(petListing, formData, savePet, petListing, deletePet, petListing), BASIC_PET_LIMIT)
     ).doIf(session -> "GOLD".equals(session.getString("pricingType"))).then(
         randomSwitch().on(
-            percent(33.0).then(exec(petListing, formData, savePet, petListing, deletePet, petListing)),
+            percent(33.0).then(repeatIfLimit(exec(petListing, formData, savePet, petListing, deletePet, petListing), GOLD_PET_LIMIT)),
             percent(33.0).then(exec(petListing, formData, savePet, visitForm, registerVisit, petListing)),
             percent(34.0).then(exec(petListing, openVademecum, queryVademecum))
         )
     ).doIf(session -> "PLATINUM".equals(session.getString("pricingType"))).then(
         randomSwitch().on(
-            percent(25.0).then(exec(petListing, formData, savePet, petListing, deletePet, petListing)),
+            percent(25.0).then(repeatIfLimit(exec(petListing, formData, savePet, petListing, deletePet, petListing), PLATINUM_PET_LIMIT)),
             percent(25.0).then(exec(petListing, formData, savePet, visitForm, registerVisit, petListing)),
             percent(25.0).then(exec(petListing, formData, savePet, consultationForm, registerConsultation, enterConsultationChat, sendConsultation)),
             percent(25.0).then(exec(petListing, openVademecum, queryVademecum))
