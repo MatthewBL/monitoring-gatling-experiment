@@ -3,29 +3,21 @@ package petclinic.common;
 import static io.gatling.javaapi.core.CoreDsl.*;
 import static io.gatling.javaapi.http.HttpDsl.*;
 
-import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import org.simpleflatmapper.lightningcsv.Row;
-
 import com.github.javafaker.Faker;
-
-import akka.actor.Cell;
 
 import java.io.BufferedReader;
 import java.io.FileReader;
-import java.io.IOException;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.List;
 
 import io.gatling.javaapi.core.*;
 import io.gatling.javaapi.http.*;
@@ -46,6 +38,60 @@ public class CombinedSimulation extends Simulation {
             "Pricing-Token", "#{pricingToken}");
 
     private final List<UserCredentials> userCredentials = new CopyOnWriteArrayList<>();
+
+    private List<String> ALL_SYMPTOMS = new ArrayList<>(List.of(
+        "fever",
+        "coughing",
+        "sneezing",
+        "vomiting",
+        "diarrhea",
+        "lethargy",
+        "loss of appetite",
+        "increased thirst polydipsia",
+        "increased urination polyuria",
+        "weight loss",
+        "weight gain",
+        "difficulty breathing dyspnea",
+        "nasal discharge",
+        "eye discharge",
+        "redness in eyes conjunctivitis",
+        "itchy skin pruritus",
+        "hair loss alopecia",
+        "skin rashes",
+        "lumps or masses",
+        "bad breath halitosis",
+        "excessive drooling ptyalism",
+        "pale gums",
+        "bleeding gums",
+        "difficulty walking or limping",
+        "stiffness in joints",
+        "swollen joints",
+        "seizures",
+        "tremors",
+        "aggressive behavior",
+        "depression-like behavior",
+        "restlessness or pacing",
+        "excessive barking or vocalization",
+        "difficulty urinating",
+        "blood in urine (hematuria)",
+        "blood in stool",
+        "constipation",
+        "bloated abdomen",
+        "painful abdomen",
+        "increased heart rate (tachycardia)",
+        "decreased heart rate (bradycardia)",
+        "uncoordinated movements (ataxia)",
+        "weakness or collapsing",
+        "excessive scratching of ears",
+        "head shaking",
+        "foul odor from ears",
+        "excessive panting",
+        "loss of consciousness",
+        "disorientation",
+        "excessive licking of paws or body",
+        "paralysis in limbs"
+    ));
+    private List<String> SYMPTOMS = new ArrayList<>();
 
     public CombinedSimulation() {
         // Load user credentials from CSV at initialization
@@ -189,23 +235,42 @@ public class CombinedSimulation extends Simulation {
                 .headers(sentHeaders)
                 .body(ElFileBody("ticket.json")));
 
+    // "Vademecum" simulation chain (only for gold and platinum users)
+    ChainBuilder openVademecum = exec(
+            http("Get in the vademecum")
+                .get("/api/v1/vets/vademecum/illnesses")
+                .headers(sentHeaders));
+
+    ChainBuilder queryVademecum = exec(
+        http("Query vademecum illnesses")
+            .get("/api/v1/vets/vademecum/illnesses")
+            .queryParam("symptoms", SYMPTOMS.get(0))
+            .queryParam("symptoms", SYMPTOMS.get(1))
+            .queryParam("symptoms", SYMPTOMS.get(2))
+            .headers(sentHeaders));
+            
+
     // Define a method to pick the simulation based on the user's pricing type
     private ChainBuilder pickSimulation = exec(session -> {
         String pricingType = session.getString("pricingType");
         session.set("randomValue", Math.random());
+        Collections.shuffle(ALL_SYMPTOMS);
+        SYMPTOMS = new ArrayList<>(ALL_SYMPTOMS.subList(0, 3));
         return session;
     }).doIf(session -> "BASIC".equals(session.getString("pricingType"))).then(
         exec(petListing, formData, savePet, petListing, deletePet, petListing)
     ).doIf(session -> "GOLD".equals(session.getString("pricingType"))).then(
         randomSwitch().on(
-            percent(50.0).then(exec(petListing, formData, savePet, petListing, deletePet, petListing)),
-            percent(50.0).then(exec(petListing, formData, savePet, visitForm, registerVisit, petListing))
+            percent(33.0).then(exec(petListing, formData, savePet, petListing, deletePet, petListing)),
+            percent(33.0).then(exec(petListing, formData, savePet, visitForm, registerVisit, petListing)),
+            percent(34.0).then(exec(petListing, openVademecum, queryVademecum))
         )
     ).doIf(session -> "PLATINUM".equals(session.getString("pricingType"))).then(
         randomSwitch().on(
-            percent(33.0).then(exec(petListing, formData, savePet, petListing, deletePet, petListing)),
-            percent(33.0).then(exec(petListing, formData, savePet, visitForm, registerVisit, petListing)),
-            percent(34.0).then(exec(petListing, formData, savePet, consultationForm, registerConsultation, enterConsultationChat, sendConsultation))
+            percent(25.0).then(exec(petListing, formData, savePet, petListing, deletePet, petListing)),
+            percent(25.0).then(exec(petListing, formData, savePet, visitForm, registerVisit, petListing)),
+            percent(25.0).then(exec(petListing, formData, savePet, consultationForm, registerConsultation, enterConsultationChat, sendConsultation)),
+            percent(25.0).then(exec(petListing, openVademecum, queryVademecum))
         )
     );
     
