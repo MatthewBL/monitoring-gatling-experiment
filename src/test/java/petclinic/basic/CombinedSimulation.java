@@ -1,4 +1,4 @@
-package petclinic.common;
+package petclinic.basic;
 
 import static io.gatling.javaapi.core.CoreDsl.*;
 import static io.gatling.javaapi.http.HttpDsl.*;
