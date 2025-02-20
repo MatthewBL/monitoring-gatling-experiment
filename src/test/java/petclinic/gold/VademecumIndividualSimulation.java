@@ -60,6 +60,7 @@ public class VademecumIndividualSimulation extends Simulation {
     public VademecumIndividualSimulation() {
         // Load user credentials from CSV at initialization
         loadUserCredentials("src/test/resources/user_credentials.csv");
+        setUp(individual.injectOpen(atOnceUsers(1)).protocols(httpProtocol));
     }
 
     private void loadUserCredentials(String filePath) {
@@ -101,10 +102,11 @@ public class VademecumIndividualSimulation extends Simulation {
         if (userCredentials.isEmpty()) {
             throw new RuntimeException("No available user credentials for login.");
         }
-        if (PLAN.toLowerCase() == "GOLD".toLowerCase()) {
-            return userCredentials.get(GOLD_ID);
-        } else {
+        System.out.println("PLAN: " + PLAN);
+        if (PLAN.toLowerCase().equals("PLATINUM".toLowerCase())) {
             return userCredentials.get(PLATINUM_ID);
+        } else {
+            return userCredentials.get(GOLD_ID);
         }
     }
     
@@ -151,7 +153,7 @@ public class VademecumIndividualSimulation extends Simulation {
 
     
     // Main Scenario without registration
-    ScenarioBuilder concurrentOwners = scenario("Concurrent Owners Simulation")
+    ScenarioBuilder individual = scenario("Individual Simulation")
         .exec(login)
         .exec(petListing, openVademecum);
 }

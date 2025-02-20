@@ -48,6 +48,7 @@ public class PetManagementIndividualSimulation extends Simulation {
     public PetManagementIndividualSimulation() {
         // Load user credentials from CSV at initialization
         loadUserCredentials("src/test/resources/user_credentials.csv");
+        setUp(individual.injectOpen(atOnceUsers(1)).protocols(httpProtocol));
     }
 
     private void loadUserCredentials(String filePath) {
@@ -89,12 +90,12 @@ public class PetManagementIndividualSimulation extends Simulation {
         if (userCredentials.isEmpty()) {
             throw new RuntimeException("No available user credentials for login.");
         }
-        if (PLAN.toLowerCase() == "BASIC".toLowerCase()) {
-            return userCredentials.get(BASIC_ID);
-        } else if (PLAN.toLowerCase() == "GOLD".toLowerCase()) {
+        if (PLAN.toLowerCase().equals("PLATINUM".toLowerCase())) {
+            return userCredentials.get(PLATINUM_ID);
+        } else if (PLAN.toLowerCase().equals("GOLD".toLowerCase())) {
             return userCredentials.get(GOLD_ID);
         } else {
-            return userCredentials.get(PLATINUM_ID);
+            return userCredentials.get(BASIC_ID);
         }
     }
     
@@ -142,7 +143,7 @@ public class PetManagementIndividualSimulation extends Simulation {
 
     
     // Main Scenario without registration
-    ScenarioBuilder concurrentOwners = scenario("Concurrent Owners Simulation")
+    ScenarioBuilder individual = scenario("Individual Simulation")
         .exec(login)
         .exec(petListing, formData, savePet, petListing, deletePet, petListing);
 }

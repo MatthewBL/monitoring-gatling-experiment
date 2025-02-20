@@ -45,6 +45,7 @@ public class ConsultationsManagementIndividualSimulation extends Simulation {
     public ConsultationsManagementIndividualSimulation() {
         // Load user credentials from CSV at initialization
         loadUserCredentials("src/test/resources/user_credentials.csv");
+        setUp(individual.injectOpen(atOnceUsers(1)).protocols(httpProtocol));
     }
 
     private void loadUserCredentials(String filePath) {
@@ -159,7 +160,7 @@ public class ConsultationsManagementIndividualSimulation extends Simulation {
 
     
     // Main Scenario without registration
-    ScenarioBuilder concurrentOwners = scenario("Concurrent Owners Simulation")
+    ScenarioBuilder individual = scenario("Individual Simulation")
         .exec(login)
         .exec(petListing, formData, savePet, consultationForm, registerConsultation, enterConsultationChat, sendConsultation, petListing, deletePet, petListing);
 }
